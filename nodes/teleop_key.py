@@ -15,8 +15,9 @@ from turtlesim.msg import Pose
 class CozmoTeleop(object):
     settings = None
 
-    def __init__(self): 
+    def __init__(self, debug=False): 
         # vars
+        self.debug = debug
         self.block_x = 0
         self.block_y = 0
         self.block_theta = 0
@@ -56,13 +57,16 @@ class CozmoTeleop(object):
             [turtle_x for _ in range(0, 4)], 
             [turtle_y for _ in range(0, 4)]), 
             key=lambda x:x[1])
+        
+        if self.debug: 
+            print(set(zip(docking_points_x, docking_points_y)))
         return closest_dock[0]
 
-    def toBlockAngle(self, block_x, block_y, turtle_x, turtle_y):
-        return math.atan2(block_y - turtle_y, block_x - turtle_x)
+    def toPointAngle(self, point_x, point_y, turtle_x, turtle_y):
+        return math.atan2(point_y - turtle_y, point_x - turtle_x)
  
-    def turnFaceBlock(self, cmd_vel, to_block_angle, turtle_angle):
-        turn_angle = to_block_angle - turtle_angle
+    def turnFacePoint(self, cmd_vel, to_point_angle, turtle_angle):
+        turn_angle = to_point_angle - turtle_angle
         if(turn_angle > 0):
             cmd_vel.angular.z = self.ang_vel
         else:
@@ -91,72 +95,31 @@ class CozmoTeleop(object):
         r = rospy.Rate(20)
         while not rospy.is_shutdown():
             cmd_vel = Twist()
-            # cmd_vel.linear.x = self.lin_vel
             
-            # s - backward
-            # cmd_vel.linear.x = -self.lin_vel
-            
-            # a - turn left
-            #cmd_vel.angular.z = self.ang_vel
-            #if(self.is_block):
             turtle_angle = self.turtle_theta
             dock_point = self.closestDock(self.block_x, self.block_y, turtle_angle, self.turtle_x, self.turtle_y)
-            to_block_angle = self.toBlockAngle(dock_point[0], dock_point[1], self.turtle_x, self.turtle_y)
+            to_block_angle = self.toPointAngle(dock_point[0], dock_point[1], self.turtle_x, self.turtle_y)
             if to_block_angle < 0:
                 to_block_angle = 2*math.pi + to_block_angle
-            #if turtle_angle < 0:
-            #    turtle_angle = 2*math.pi + turtle_angle
-            print(str(to_block_angle) + " : " + str(abs(turtle_angle)))
+            
             if not self.equalAngles(to_block_angle, abs(turtle_angle)) and not at(dock_point, self.turtle_x, self.turtle_y):
-                self.turnFaceBlock(cmd_vel, to_block_angle, turtle_angle)  
+                self.turnFacePoint(cmd_vel, to_block_angle, turtle_angle)  
             elif not at(dock_point, self.turtle_x, self.turtle_y):
                 self.moveForward(cmd_vel)
             else:
-                to_block_angle = self.toBlockAngle(self.block_x, self.block_y, self.turtle_x, self.turtle_y)
-                self.turnFaceBlock(cmd_vel, to_block_angle, turtle_angle)
+                to_block_angle = self.toPointAngle(self.block_x, self.block_y, self.turtle_x, self.turtle_y)
+                self.turnFacePoint(cmd_vel, to_block_angle, turtle_angle)
                 
-            #self.closestDockingPosition(self.block_x, self.block_y, self.turtle_x, self.turtle_y)
-            # d - turn right
-            # cmd_vel.angular.z = -self.ang_vel
-
-            # head movement
-            # r - up
-            # self.head_angle += 2.0
-            # if self.head_angle > MAX_HEAD_ANGLE:
-            #     self.head_angle = MAX_HEAD_ANGLE
-            #     head_changed = True
-            # v - down
-            # self.head_angle -= 2.0
-            # if self.head_angle < MIN_HEAD_ANGLE:
-            #     self.head_angle = MIN_HEAD_ANGLE
-            #     head_changed = True
             self._cmd_vel_pub.publish(cmd_vel)
             r.sleep()
-            # lift movement
-
-            # t - up
-            # self.lift_height += 2.0
-            # if self.lift_height > MAX_LIFT_HEIGHT:
-            #     self.lift_height = MAX_LIFT_HEIGHT
-            #     lift_changed = True
-            # b - down
-            # self.lift_height -= 2.0
-            # if self.lift_height < MIN_LIFT_HEIGHT:
-            #     self.lift_height = MIN_LIFT_HEIGHT
-            #     lift_changed = True
-
-            # publish commands (head angle and lift height on change only)
-            #self._cmd_vel_pub.publish(cmd_vel)
-            #if head_changed:
-            #    self._head_pub.publish(data=self.head_angle)
-            #if lift_changed:
-            #    self._lift_pub.publish(data=(self.lift_height-MIN_LIFT_HEIGHT)/SUM_LIFT_HEIGHT)
-
-            #r.sleep()
 
 # start ROS node
 rospy.init_node('teleop_key', disable_signals=True)
 # initialize keyboard teleoperation
-cozmo_teleop = CozmoTeleop()
-# loop
-cozmo_teleop.run()
+cozmo_teleop = CozmoTeleop(debug=True)
+if cozmo_teleop.debug:
+    #debug
+    print(cozmo_teleop.closestDock(4,4,math.pi/4,5,1))
+else:
+    # loop
+    cozmo_teleop.run()
