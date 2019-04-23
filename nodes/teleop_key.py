@@ -6,6 +6,7 @@ import termios
 import atexit
 import rospy
 import math
+import matplotlib.pyplot as plt
 from select import select
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64
@@ -60,6 +61,10 @@ class CozmoTeleop(object):
         
         if self.debug: 
             print(set(zip(docking_points_x, docking_points_y)))
+            docking_points_x.append(block_x)
+            docking_points_y.append(block_y)
+            plt.plot(docking_points_x, docking_points_y, 'ro')
+            plt.show()
         return closest_dock[0]
 
     def toPointAngle(self, point_x, point_y, turtle_x, turtle_y):
@@ -119,7 +124,7 @@ rospy.init_node('teleop_key', disable_signals=True)
 cozmo_teleop = CozmoTeleop(debug=True)
 if cozmo_teleop.debug:
     #debug
-    print(cozmo_teleop.closestDock(4,4,math.pi/4,5,1))
+    print(cozmo_teleop.closestDock(4,4,0,5,1))
 else:
     # loop
     cozmo_teleop.run()
