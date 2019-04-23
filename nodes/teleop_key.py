@@ -103,12 +103,12 @@ class CozmoTeleop(object):
             
             turtle_angle = self.turtle_theta
             dock_point = self.closestDock(self.block_x, self.block_y, turtle_angle, self.turtle_x, self.turtle_y)
-            to_block_angle = self.toPointAngle(dock_point[0], dock_point[1], self.turtle_x, self.turtle_y)
-            if to_block_angle < 0:
-                to_block_angle = 2*math.pi + to_block_angle
+            to_dock_angle = self.toPointAngle(dock_point[0], dock_point[1], self.turtle_x, self.turtle_y)
+            if to_dock_angle < 0:
+                to_dock_angle = 2*math.pi + to_dock_angle
             
-            if not self.equalAngles(to_block_angle, abs(turtle_angle)) and not at(dock_point, self.turtle_x, self.turtle_y):
-                self.turnFacePoint(cmd_vel, to_block_angle, turtle_angle)  
+            if not self.equalAngles(to_dock_angle, abs(turtle_angle)) and not at(dock_point, self.turtle_x, self.turtle_y):
+                self.turnFacePoint(cmd_vel, to_dock_angle, turtle_angle)  
             elif not at(dock_point, self.turtle_x, self.turtle_y):
                 self.moveForward(cmd_vel)
             else:
