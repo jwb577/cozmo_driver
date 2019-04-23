@@ -1,221 +1,161 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-"""
-This file implements a ROS keyboard teleoperation node for the ANKI Cozmo robot.
-
-Keyboard mapping:
-
-w - forward
-a - backward
-s - turn left
-d - turn right
-
-r - head up
-f - head normal position
-v - head down
-
-t - lift up
-t - lift normal position
-t - lift down
-
-Copyright {2017} {Peter Rudolph}
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-"""
-
-import rospy
 import sys
 import tty
 import termios
 import atexit
+import rospy
+import math
 from select import select
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64
-
-MIN_HEAD_ANGLE = -25.0
-MAX_HEAD_ANGLE = 44.5
-STD_HEAD_ANGLE = 20.0
-SUM_HEAD_ANGLE = MAX_HEAD_ANGLE - MIN_HEAD_ANGLE
-
-MIN_LIFT_HEIGHT = 32.0
-MAX_LIFT_HEIGHT = 92.0
-STD_LIFT_HEIGHT = 32.0
-SUM_LIFT_HEIGHT = MAX_LIFT_HEIGHT - MIN_LIFT_HEIGHT
+from turtlesim.msg import Pose
 
 
 class CozmoTeleop(object):
-    """
-    Class providing keyboard teleoperation functionality for Cozmo robot.
-
-    """
-
     settings = None
 
-    def __init__(self):
-        # setup
-        CozmoTeleop.settings = termios.tcgetattr(sys.stdin)
-        atexit.register(self.reset_terminal)
-
+    def __init__(self): 
         # vars
-        self.head_angle = STD_HEAD_ANGLE
-        self.lift_height = STD_LIFT_HEIGHT
-
+        self.block_x = 0
+        self.block_y = 0
+        self.block_theta = 0
+        self.turtle_x = 0
+        self.turtle_y = 0
+        self.turtle_theta = 0
         # params
         self.lin_vel = rospy.get_param('~lin_vel', 0.2)
         self.ang_vel = rospy.get_param('~ang_vel', 1.5757)
 
         # pubs
-        self._head_pub = rospy.Publisher('head_angle', Float64, queue_size=1)
-        self._lift_pub = rospy.Publisher('lift_height', Float64, queue_size=1)
-        self._cmd_vel_pub = rospy.Publisher('cmd_vel', Twist, queue_size=1)
+        self._cmd_vel_pub = rospy.Publisher('turtle1/cmd_vel', Twist, queue_size=1)
+        
+        def turtlePose(pose):
+            self.turtle_x = pose.x
+            self.turtle_y = pose.y
+            self.turtle_theta = pose.theta
 
-    def get_key(self):
-        """
-        Get the latest keyboard input.
+        def blockPose(pose):
+            self.block_x = pose.x
+            self.block_y = pose.y
+            self.block_theta = pose.theta
 
-        :rtype: char
-        :returns: The key pressed.
-        """
-        self.set_terminal()
-        select([sys.stdin], [], [], 0)
-        key = sys.stdin.read(1)
-        self.reset_terminal()
-        return key
+        #subs
+        rospy.Subscriber('block/pose', Pose, blockPose)
+        rospy.Subscriber('turtle1/pose', Pose, turtlePose)
 
-    @staticmethod
-    def set_terminal():
-        """
-        Set the terminal to raw state.
+    def closestDock(self, block_x, block_y, block_theta, turtle_x, turtle_y):
+        assert(block_theta >= 0)
+        flat_angles = [(block_theta + (i * math.pi)/2) % (2*math.pi) for i in range(0, 4)]
+        docking_points_x = [block_x + 2*math.cos(angle) for angle in flat_angles]
+        docking_points_y = [block_y + 2*math.sin(angle) for angle in flat_angles]
+        closest_dock = min(map(
+            self.euclidean_distance, 
+            docking_points_x, 
+            docking_points_y, 
+            [turtle_x for _ in range(0, 4)], 
+            [turtle_y for _ in range(0, 4)]), 
+            key=lambda x:x[1])
+        return closest_dock[0]
 
-        """
-        tty.setraw(sys.stdin.fileno())
+    def toBlockAngle(self, block_x, block_y, turtle_x, turtle_y):
+        return math.atan2(block_y - turtle_y, block_x - turtle_x)
+ 
+    def turnFaceBlock(self, cmd_vel, to_block_angle, turtle_angle):
+        turn_angle = to_block_angle - turtle_angle
+        if(turn_angle > 0):
+            cmd_vel.angular.z = self.ang_vel
+        else:
+            cmd_vel.angular.z = -self.ang_vel
+    
+    def moveForward(self, cmd_vel):
+        cmd_vel.linear.x = self.lin_vel
 
-    @staticmethod
-    def reset_terminal():
-        """
-        Reset the terminal to state before class initialization.
-
-        """
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, CozmoTeleop.settings)
+    def equalAngles(self, a, b):
+        if(abs(a-b)<.05):
+            return True
+        else:
+            return False
+    
+    def euclidean_distance(self, x, y, turtle_x, turtle_y):
+        return [(x, y), math.sqrt(pow((x - turtle_x), 2) + pow((y - turtle_y), 2))]
 
     def run(self):
-        """
-        The keyboard capture loop.
 
-        """
+        def at(point, x, y):
+            if self.euclidean_distance(point[0], point[1], x, y)[1] < .05:
+                return True
+            else:
+                return False
+ 
         r = rospy.Rate(20)
-
         while not rospy.is_shutdown():
-
-            # reset twist (commanded velocities)
             cmd_vel = Twist()
-
-            # reset states
-            head_changed = False
-            lift_changed = False
-
-            # get key
-            key = self.get_key()
-
-            # get number from key
-            ord_key = ord(key)
-
-            # ctrl+c
-            if ord_key == 3:
-                print('Shutdown')
-                break
-
-            # esc
-            if ord_key == 27:
-                print('Escaping')
-                key_1 = self.get_key()
-                key_2 = self.get_key()
-                ord_key2 = ord(key_2)
-                if ord_key2 == 65:
-                    ord_key = 119
-                elif ord_key2 == 66:
-                    ord_key = 115
-                elif ord_key2 == 67:
-                    ord_key = 97
-                elif ord_key2 == 68:
-                    ord_key = 100
-
-            # robot
-            # w - forward
-            elif ord_key == 119:
-                cmd_vel.linear.x = self.lin_vel
+            # cmd_vel.linear.x = self.lin_vel
+            
             # s - backward
-            elif ord_key == 115:
-                cmd_vel.linear.x = -self.lin_vel
+            # cmd_vel.linear.x = -self.lin_vel
+            
             # a - turn left
-            elif ord_key == 97:
-                cmd_vel.angular.z = self.ang_vel
+            #cmd_vel.angular.z = self.ang_vel
+            #if(self.is_block):
+            turtle_angle = self.turtle_theta
+            dock_point = self.closestDock(self.block_x, self.block_y, turtle_angle, self.turtle_x, self.turtle_y)
+            to_block_angle = self.toBlockAngle(dock_point[0], dock_point[1], self.turtle_x, self.turtle_y)
+            if to_block_angle < 0:
+                to_block_angle = 2*math.pi + to_block_angle
+            #if turtle_angle < 0:
+            #    turtle_angle = 2*math.pi + turtle_angle
+            print(str(to_block_angle) + " : " + str(abs(turtle_angle)))
+            if not self.equalAngles(to_block_angle, abs(turtle_angle)) and not at(dock_point, self.turtle_x, self.turtle_y):
+                self.turnFaceBlock(cmd_vel, to_block_angle, turtle_angle)  
+            elif not at(dock_point, self.turtle_x, self.turtle_y):
+                self.moveForward(cmd_vel)
+            else:
+                to_block_angle = self.toBlockAngle(self.block_x, self.block_y, self.turtle_x, self.turtle_y)
+                self.turnFaceBlock(cmd_vel, to_block_angle, turtle_angle)
+                
+            #self.closestDockingPosition(self.block_x, self.block_y, self.turtle_x, self.turtle_y)
             # d - turn right
-            elif ord_key == 100:
-                cmd_vel.angular.z = -self.ang_vel
+            # cmd_vel.angular.z = -self.ang_vel
 
             # head movement
             # r - up
-            elif ord_key == 114:
-                self.head_angle += 2.0
-                if self.head_angle > MAX_HEAD_ANGLE:
-                    self.head_angle = MAX_HEAD_ANGLE
-                head_changed = True
-            # f - center
-            elif ord_key == 102:
-                self.head_angle = STD_HEAD_ANGLE
-                head_changed = True
+            # self.head_angle += 2.0
+            # if self.head_angle > MAX_HEAD_ANGLE:
+            #     self.head_angle = MAX_HEAD_ANGLE
+            #     head_changed = True
             # v - down
-            elif ord_key == 118:
-                self.head_angle -= 2.0
-                if self.head_angle < MIN_HEAD_ANGLE:
-                    self.head_angle = MIN_HEAD_ANGLE
-                head_changed = True
-
+            # self.head_angle -= 2.0
+            # if self.head_angle < MIN_HEAD_ANGLE:
+            #     self.head_angle = MIN_HEAD_ANGLE
+            #     head_changed = True
+            self._cmd_vel_pub.publish(cmd_vel)
+            r.sleep()
             # lift movement
-            # t - up
-            elif ord_key == 116:
-                self.lift_height += 2.0
-                if self.lift_height > MAX_LIFT_HEIGHT:
-                    self.lift_height = MAX_LIFT_HEIGHT
-                lift_changed = True
-            # g - center
-            elif ord_key == 103:
-                self.lift_height = STD_LIFT_HEIGHT
-                lift_changed = True
-            # b - down
-            elif ord_key == 98:
-                self.lift_height -= 2.0
-                if self.lift_height < MIN_LIFT_HEIGHT:
-                    self.lift_height = MIN_LIFT_HEIGHT
-                lift_changed = True
 
-            # debug
-            else:
-                print(ord(ord_key))
+            # t - up
+            # self.lift_height += 2.0
+            # if self.lift_height > MAX_LIFT_HEIGHT:
+            #     self.lift_height = MAX_LIFT_HEIGHT
+            #     lift_changed = True
+            # b - down
+            # self.lift_height -= 2.0
+            # if self.lift_height < MIN_LIFT_HEIGHT:
+            #     self.lift_height = MIN_LIFT_HEIGHT
+            #     lift_changed = True
 
             # publish commands (head angle and lift height on change only)
-            self._cmd_vel_pub.publish(cmd_vel)
-            if head_changed:
-                self._head_pub.publish(data=self.head_angle)
-            if lift_changed:
-                self._lift_pub.publish(data=(self.lift_height-MIN_LIFT_HEIGHT)/SUM_LIFT_HEIGHT)
+            #self._cmd_vel_pub.publish(cmd_vel)
+            #if head_changed:
+            #    self._head_pub.publish(data=self.head_angle)
+            #if lift_changed:
+            #    self._lift_pub.publish(data=(self.lift_height-MIN_LIFT_HEIGHT)/SUM_LIFT_HEIGHT)
 
-            r.sleep()
+            #r.sleep()
 
 # start ROS node
-rospy.init_node('cozmo_teleop_key')
+rospy.init_node('teleop_key', disable_signals=True)
 # initialize keyboard teleoperation
 cozmo_teleop = CozmoTeleop()
 # loop
