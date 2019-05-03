@@ -154,7 +154,7 @@ class CozmoRos(object):
         # subs
         self._backpack_led_sub = rospy.Subscriber(
             'backpack_led', ColorRGBA, self._set_backpack_led, queue_size=1)
-        self._twist_sub = rospy.Subscriber('cmd_vel', Twist, self._twist_callback, queue_size=1)
+        self._twist_sub = rospy.Subscriber('turtle1/cmd_vel', Twist, self._twist_callback, queue_size=1)
         self._say_sub = rospy.Subscriber('say', String, self._say_callback, queue_size=1)
         self._head_sub = rospy.Subscriber('head_angle', Float64, self._move_head, queue_size=1)
         self._lift_sub = rospy.Subscriber('lift_height', Float64, self._move_lift, queue_size=1)
@@ -251,7 +251,7 @@ class CozmoRos(object):
         """
         # compute differential wheel speed
         axle_length = 0.07  # 7cm
-        self._cmd_lin_vel = cmd.linear.x
+        self._cmd_lin_vel = cmd.linear.x/5
         self._cmd_ang_vel = cmd.angular.z
         rv = self._cmd_lin_vel + (self._cmd_ang_vel * axle_length * 0.5)
         lv = self._cmd_lin_vel - (self._cmd_ang_vel * axle_length * 0.5)

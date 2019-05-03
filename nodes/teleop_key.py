@@ -26,8 +26,8 @@ class CozmoTeleop(object):
         self.turtle_y = 0
         self.turtle_theta = 0
         # params
-        self.lin_vel = rospy.get_param('~lin_vel', 0.5)
-        self.ang_vel = rospy.get_param('~ang_vel', 0.5)
+        self.lin_vel = rospy.get_param('~lin_vel', 0.4)
+        self.ang_vel = rospy.get_param('~ang_vel', 1.5757)
 
         # pubs
         self._cmd_vel_pub = rospy.Publisher('turtle1/cmd_vel', Twist, queue_size=1)
